@@ -1,5 +1,7 @@
 # NYC Dining Concierge
 
+**Live app:** https://mapsfooddatabase-bhkjca9anz4utbcinglkux.streamlit.app
+
 A Streamlit chatbot + map app for querying a curated list of NYC restaurants and bars.
 Ask for a vibe, neighborhood, or occasion; get back structured recommendation cards synced
 to an interactive Folium map, with bookmarking and light itinerary building.

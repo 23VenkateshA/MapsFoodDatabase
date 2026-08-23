@@ -33,7 +33,7 @@ st.set_page_config(page_title="NYC Dining Concierge", page_icon="🍽️", layou
 # ---------------------------------------------------------------------------
 
 @st.cache_data
-def load_places():
+def load_places(_cache_key):
     with open(DATA_PATH, encoding="utf-8") as f:
         return json.load(f)
 
@@ -576,7 +576,7 @@ def render_browse_view(saved_places):
 
 def main():
     init_state()
-    saved_places = load_places()
+    saved_places = load_places(DATA_PATH.stat().st_mtime)
 
     st.title("🍽️ NYC Dining Concierge")
     st.caption(
