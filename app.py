@@ -19,6 +19,8 @@ load_dotenv()
 
 DATA_PATH = Path(__file__).parent / "data" / "places.json"
 NYC_CENTER = (40.7295, -73.9965)
+BROWSE_CARD_LIMIT = 40
+CATEGORY_CHIPS = [("All", "All"), ("Bars", "Bar"), ("Cafes", "Cafe"), ("Eats", "Eats")]
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -49,6 +51,9 @@ def init_state():
         "last_summary": "",
         "last_filters": [],
         "pending_query": None,
+        "view_mode": "chat",
+        "browse_query": "",
+        "browse_category": "All",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -359,6 +364,50 @@ def build_map(spots, saved_places):
 
 
 # ---------------------------------------------------------------------------
+# Browse / search (full dataset, independent of the chat's LLM picks)
+# ---------------------------------------------------------------------------
+
+def place_to_spot(place):
+    category = place.get("category", "Eats")
+    return {
+        "id": place["id"],
+        "name": place["name"],
+        "source": "saved",
+        "is_bookmarked": place["id"] in st.session_state.bookmarks,
+        "category": category,
+        "neighborhood": place.get("neighborhood", ""),
+        "cuisine": place.get("cuisine", []),
+        "price_level": place.get("price_level", "$"),
+        "rating": place.get("rating"),
+        "match_highlight": place.get("happy_hour_info") or place.get("notes", ""),
+        "coordinates": {"lat": place.get("lat"), "lng": place.get("lng")},
+        "links": {
+            "google_maps": place.get("google_url", ""),
+            "reservation_url": None,
+            "reservation_platform": None,
+        },
+        "itinerary_context": {
+            "best_time_slot": "9:00 AM - 11:00 AM" if category == "Cafe" else "6:00 PM - 8:00 PM",
+            "estimated_duration_min": 45 if category == "Cafe" else 75,
+        },
+    }
+
+
+def filter_places(places, query, category):
+    query_lower = (query or "").strip().lower()
+
+    def matches(p):
+        if category != "All" and p.get("category") != category:
+            return False
+        if not query_lower:
+            return True
+        haystack = " ".join([p["name"], p.get("neighborhood", ""), " ".join(p.get("cuisine", []))]).lower()
+        return query_lower in haystack
+
+    return [p for p in places if matches(p)]
+
+
+# ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
 
@@ -406,6 +455,8 @@ def render_sidebar():
         st.session_state.last_spots = []
         st.session_state.last_summary = ""
         st.session_state.last_filters = []
+        st.session_state.browse_query = ""
+        st.session_state.browse_category = "All"
         st.rerun()
 
     if not OPENAI_API_KEY and not ANTHROPIC_API_KEY:
@@ -434,55 +485,119 @@ def process_query(query, saved_places):
     st.session_state.messages.append({"role": "assistant", "content": result.get("summary", "")})
 
 
+def render_mode_toggle():
+    mode_cols = st.columns(2)
+    if mode_cols[0].button(
+        "💬 Concierge Chat", use_container_width=True,
+        type="primary" if st.session_state.view_mode == "chat" else "secondary",
+    ):
+        st.session_state.view_mode = "chat"
+        st.rerun()
+    if mode_cols[1].button(
+        "🔎 Browse All Spots", use_container_width=True,
+        type="primary" if st.session_state.view_mode == "browse" else "secondary",
+    ):
+        st.session_state.view_mode = "browse"
+        st.rerun()
+
+
+def render_chat_view(saved_places):
+    chat_box = st.container(height=380, border=True)
+    with chat_box:
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+    if st.session_state.last_filters:
+        st.write("Quick filters:")
+        filter_cols = st.columns(len(st.session_state.last_filters))
+        for i, label in enumerate(st.session_state.last_filters):
+            if filter_cols[i].button(label, key=f"qf-{i}"):
+                st.session_state.pending_query = label
+                st.rerun()
+
+    query = st.chat_input("e.g. Asian happy hour in East Village for 6 people")
+    if st.session_state.pending_query:
+        query = st.session_state.pending_query
+        st.session_state.pending_query = None
+
+    if query:
+        with st.spinner("Finding spots..."):
+            process_query(query, saved_places)
+        st.rerun()
+
+    st.divider()
+    st.subheader(f"Recommendations ({len(st.session_state.last_spots)})")
+    if st.session_state.last_summary:
+        st.info(st.session_state.last_summary)
+    if not st.session_state.last_spots:
+        st.caption("Ask a question above to get recommendations.")
+    else:
+        for idx, spot in enumerate(st.session_state.last_spots):
+            render_spot_card(spot, idx)
+
+    return st.session_state.last_spots
+
+
+def render_browse_view(saved_places):
+    st.text_input(
+        "Search all spots",
+        key="browse_query",
+        placeholder="Search by name, neighborhood, or cuisine (e.g. tacos, East Village, bagels)",
+    )
+
+    chip_cols = st.columns(len(CATEGORY_CHIPS))
+    for col, (label, value) in zip(chip_cols, CATEGORY_CHIPS):
+        if col.button(
+            label, key=f"chip-{value}", use_container_width=True,
+            type="primary" if st.session_state.browse_category == value else "secondary",
+        ):
+            st.session_state.browse_category = value
+            st.rerun()
+
+    filtered = filter_places(saved_places, st.session_state.browse_query, st.session_state.browse_category)
+    spots = [place_to_spot(p) for p in filtered]
+
+    st.divider()
+    st.subheader(f"Browse ({len(spots)} of {len(saved_places)})")
+    if not spots:
+        st.caption("No spots match your search — try a different keyword or category.")
+    else:
+        if len(spots) > BROWSE_CARD_LIMIT:
+            st.caption(
+                f"Showing the first {BROWSE_CARD_LIMIT} of {len(spots)} matches — "
+                "the map on the right still plots all of them. Narrow your search to see more cards."
+            )
+        for idx, spot in enumerate(spots[:BROWSE_CARD_LIMIT]):
+            render_spot_card(spot, idx)
+
+    return spots
+
+
 def main():
     init_state()
     saved_places = load_places()
 
     st.title("🍽️ NYC Dining Concierge")
-    st.caption("Ask for a vibe, a neighborhood, or an occasion — get matched spots and a live map.")
+    st.caption(
+        f"{len(saved_places)} saved NYC spots — chat for curated picks, or search and filter the full list."
+    )
 
     render_sidebar()
 
     left, right = st.columns([1, 1], gap="large")
 
     with left:
-        chat_box = st.container(height=380, border=True)
-        with chat_box:
-            for msg in st.session_state.messages:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-
-        if st.session_state.last_filters:
-            st.write("Quick filters:")
-            filter_cols = st.columns(len(st.session_state.last_filters))
-            for i, label in enumerate(st.session_state.last_filters):
-                if filter_cols[i].button(label, key=f"qf-{i}"):
-                    st.session_state.pending_query = label
-                    st.rerun()
-
-        query = st.chat_input("e.g. Asian happy hour in East Village for 6 people")
-        if st.session_state.pending_query:
-            query = st.session_state.pending_query
-            st.session_state.pending_query = None
-
-        if query:
-            with st.spinner("Finding spots..."):
-                process_query(query, saved_places)
-            st.rerun()
-
+        render_mode_toggle()
         st.divider()
-        st.subheader(f"Recommendations ({len(st.session_state.last_spots)})")
-        if st.session_state.last_summary:
-            st.info(st.session_state.last_summary)
-        if not st.session_state.last_spots:
-            st.caption("Ask a question above to get recommendations.")
+        if st.session_state.view_mode == "browse":
+            map_spots = render_browse_view(saved_places)
         else:
-            for idx, spot in enumerate(st.session_state.last_spots):
-                render_spot_card(spot, idx)
+            map_spots = render_chat_view(saved_places)
 
     with right:
         st.subheader("Map")
-        fmap = build_map(st.session_state.last_spots, saved_places)
+        fmap = build_map(map_spots, saved_places)
         st_folium(fmap, height=560, use_container_width=True, key="dining_map")
         st.caption("🔵 Blue = your saved spots · 🟢 Green = curated fallback picks")
 
