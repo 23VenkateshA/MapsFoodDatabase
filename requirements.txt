@@ -1,0 +1,8 @@
+streamlit>=1.32
+streamlit-folium>=0.20
+folium>=0.15
+openai>=1.14
+anthropic>=0.25
+pandas>=2.0
+python-dotenv>=1.0
+requests>=2.31
