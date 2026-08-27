@@ -36,6 +36,94 @@ OPENROUTER_MODEL = "openai/gpt-4o-mini"
 st.set_page_config(page_title="NYC Dining Concierge", page_icon="🍽️", layout="wide")
 
 
+CUSTOM_CSS = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    '<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600'
+    '&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">'
+    "<style>"
+    ":root {"
+    "  --nyc-accent: #D97757;"
+    "  --nyc-saved: #7FB08F;"
+    "  --nyc-saved-bg: rgba(127, 176, 143, 0.16);"
+    "  --nyc-curated: #E0AE5C;"
+    "  --nyc-curated-bg: rgba(224, 174, 92, 0.16);"
+    "  --nyc-border: rgba(243, 236, 230, 0.14);"
+    "  --nyc-muted: rgba(243, 236, 230, 0.62);"
+    "}"
+    "html, body, .stApp, .stApp p, .stApp span, .stApp div,"
+    '[data-testid="stCaptionContainer"], [data-testid="stMarkdownContainer"],'
+    '[data-testid="stButton"] button, [data-testid="stWidgetLabel"] {'
+    "  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;"
+    "}"
+    '[data-testid="stAppViewContainer"] h1, [data-testid="stAppViewContainer"] h2,'
+    '[data-testid="stAppViewContainer"] h3, [data-testid="stSidebar"] h1,'
+    '[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {'
+    "  font-family: 'Fraunces', Georgia, serif;"
+    "  font-weight: 600;"
+    "  text-wrap: balance;"
+    "  letter-spacing: -0.01em;"
+    "}"
+    '[data-testid="stCaptionContainer"] { color: var(--nyc-muted) !important; }'
+    '[data-testid="stButton"] button:focus-visible, [data-testid="stLinkButton"] a:focus-visible,'
+    '[data-testid="stTextInput"] input:focus-visible,'
+    '[data-testid="stFileUploaderDropzone"]:focus-within {'
+    "  outline: 2px solid var(--nyc-accent) !important;"
+    "  outline-offset: 2px;"
+    "}"
+    '[data-testid="stButton"] button, [data-testid="stLinkButton"] a {'
+    "  transition: transform 120ms ease, box-shadow 120ms ease;"
+    "}"
+    '[data-testid="stButton"] button:hover, [data-testid="stLinkButton"] a:hover {'
+    "  transform: translateY(-1px);"
+    "  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);"
+    "}"
+    # Recommendation/browse cards: st.container(border=True) whose first child carries a
+    # .nyc-card-marker sentinel, scoped via :has() since Streamlit's own stVerticalBlock
+    # testid is shared with every non-card wrapper too.
+    '[data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .nyc-card-marker) {'
+    "  border-radius: 14px !important;"
+    "  border-color: var(--nyc-border) !important;"
+    "  padding: 6px 8px !important;"
+    "  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;"
+    "}"
+    '[data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .nyc-card-marker):hover {'
+    "  transform: translateY(-2px);"
+    "  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);"
+    "  border-color: var(--nyc-accent) !important;"
+    "}"
+    "@media (prefers-reduced-motion: reduce) {"
+    '  [data-testid="stButton"] button, [data-testid="stLinkButton"] a,'
+    '  [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .nyc-card-marker) {'
+    "    transition: none !important;"
+    "  }"
+    '  [data-testid="stButton"] button:hover, [data-testid="stLinkButton"] a:hover,'
+    '  [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .nyc-card-marker):hover {'
+    "    transform: none !important;"
+    "    box-shadow: none !important;"
+    "  }"
+    "}"
+    ".nyc-chip {"
+    "  display: inline-block;"
+    "  padding: 3px 10px;"
+    "  border-radius: 999px;"
+    "  font-size: 0.72rem;"
+    "  font-weight: 600;"
+    "  text-transform: uppercase;"
+    "  letter-spacing: 0.04em;"
+    "  white-space: nowrap;"
+    "}"
+    ".nyc-chip-saved { background: var(--nyc-saved-bg); color: var(--nyc-saved); }"
+    ".nyc-chip-curated { background: var(--nyc-curated-bg); color: var(--nyc-curated); }"
+    ".nyc-rating { font-variant-numeric: tabular-nums; font-weight: 600; }"
+    "</style>"
+)
+
+
+def inject_custom_css():
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------
@@ -238,19 +326,25 @@ def get_recommendations(user_query, saved_places, history):
 def render_spot_card(spot, idx):
     sid = spot.get("id", f"spot-{idx}")
     is_bookmarked = sid in st.session_state.bookmarks
-    badge = "🔖 SAVED" if spot.get("source") == "saved" else "✨ CURATED PICK"
+    if spot.get("source") == "saved":
+        badge_html = '<span class="nyc-chip nyc-chip-saved">🔖 Saved</span>'
+    else:
+        badge_html = '<span class="nyc-chip nyc-chip-curated">✨ Curated Pick</span>'
     key_base = f"{sid}-{idx}"
 
     with st.container(border=True):
+        st.markdown('<span class="nyc-card-marker"></span>', unsafe_allow_html=True)
         header_cols = st.columns([5, 2])
         with header_cols[0]:
             st.markdown(
-                f"**{spot.get('name', 'Unknown')}**   ⭐ {spot.get('rating', '—')}"
+                f"**{spot.get('name', 'Unknown')}**   "
+                f"⭐ <span class='nyc-rating'>{spot.get('rating', '—')}</span>"
                 f"   {spot.get('price_level', '$')}"
-                f"   📍 {spot.get('neighborhood', '—')}"
+                f"   📍 {spot.get('neighborhood', '—')}",
+                unsafe_allow_html=True,
             )
         with header_cols[1]:
-            st.markdown(f"<div style='text-align:right'>{badge}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align:right'>{badge_html}</div>", unsafe_allow_html=True)
 
         cuisine = ", ".join(spot.get("cuisine", []))
         if cuisine:
@@ -576,7 +670,7 @@ def render_sidebar():
         for sid, spot in list(st.session_state.bookmarks.items()):
             cols = st.sidebar.columns([4, 1])
             cols[0].markdown(f"**{spot.get('name')}** · {spot.get('neighborhood', '')}")
-            if cols[1].button("✕", key=f"unbm-{sid}"):
+            if cols[1].button("✕", key=f"unbm-{sid}", help=f"Remove {spot.get('name', 'this spot')} from bookmarks"):
                 st.session_state.bookmarks.pop(sid, None)
                 st.rerun()
 
@@ -591,7 +685,7 @@ def render_sidebar():
             time_slot = itin.get("best_time_slot", "Time TBD")
             duration = itin.get("estimated_duration_min", "?")
             cols[0].markdown(f"**{idx + 1}. {spot.get('name')}**  \n{time_slot} · ~{duration} min")
-            if cols[1].button("✕", key=f"unitin-{idx}"):
+            if cols[1].button("✕", key=f"unitin-{idx}", help=f"Remove {spot.get('name', 'this stop')} from itinerary"):
                 st.session_state.itinerary.pop(idx)
                 st.rerun()
 
@@ -644,7 +738,7 @@ def process_query(query, saved_places):
 
 
 def render_mode_toggle():
-    mode_cols = st.columns([1, 1, 0.7])
+    mode_cols = st.columns([1, 1, 0.9])
     if mode_cols[0].button(
         "💬 Concierge Chat", use_container_width=True,
         type="primary" if st.session_state.view_mode == "chat" else "secondary",
@@ -723,7 +817,7 @@ def render_chat_view(saved_places):
         st.session_state.pending_query = None
 
     if query:
-        with st.spinner("Finding spots..."):
+        with st.spinner("Finding spots…"):
             process_query(query, saved_places)
         st.rerun()
 
@@ -776,6 +870,7 @@ def render_browse_view(saved_places):
 
 
 def main():
+    inject_custom_css()
     saved_places = get_active_places()
     init_state(saved_places)
 
