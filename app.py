@@ -5,15 +5,21 @@ Left column: chat + structured recommendation cards. Right column: synced
 Folium map. Sidebar: bookmarks + itinerary management.
 """
 
+import csv
+import io
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 import folium
+import requests
 import streamlit as st
 from dotenv import load_dotenv
 from streamlit_folium import st_folium
+
+import enrich_places
 
 load_dotenv()
 
@@ -21,9 +27,11 @@ DATA_PATH = Path(__file__).parent / "data" / "places.json"
 NYC_CENTER = (40.7295, -73.9965)
 BROWSE_CARD_LIMIT = 40
 CATEGORY_CHIPS = [("All", "All"), ("Bars", "Bar"), ("Cafes", "Cafe"), ("Eats", "Eats")]
+SEED_BOOKMARK_IDS = ["212-east", "wiggle-room", "the-bean", "mahmoud-s-corner-halal-food-cart"]
+SEED_ITINERARY_ID = "cello-s-pizzeria"
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = "openai/gpt-4o-mini"
 
 st.set_page_config(page_title="NYC Dining Concierge", page_icon="🍽️", layout="wide")
 
@@ -42,11 +50,14 @@ def load_places(_cache_key):
 # Session state
 # ---------------------------------------------------------------------------
 
-def init_state():
+def init_state(saved_places):
+    seed_bookmarks = {p["id"]: place_to_spot(p) for p in saved_places if p["id"] in SEED_BOOKMARK_IDS}
+    seed_itinerary = [place_to_spot(p) for p in saved_places if p["id"] == SEED_ITINERARY_ID]
+
     defaults = {
         "messages": [],
-        "bookmarks": {},
-        "itinerary": [],
+        "bookmarks": seed_bookmarks,
+        "itinerary": seed_itinerary,
         "last_spots": [],
         "last_summary": "",
         "last_filters": [],
@@ -54,6 +65,9 @@ def init_state():
         "view_mode": "chat",
         "browse_query": "",
         "browse_category": "All",
+        "uploaded_places": None,
+        "upload_status": None,
+        "_last_upload_sig": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -134,42 +148,22 @@ def extract_json(text: str) -> dict:
     return json.loads(text)
 
 
-def call_openai(user_query, system_prompt, history):
+def call_openrouter(user_query, system_prompt, history):
     from openai import OpenAI
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    client = OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
     messages = [{"role": "system", "content": system_prompt}]
     for m in history[-6:]:
         messages.append({"role": m["role"], "content": m["content"]})
     messages.append({"role": "user", "content": user_query})
 
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=OPENROUTER_MODEL,
         messages=messages,
         response_format={"type": "json_object"},
         temperature=0.4,
     )
-    return json.loads(resp.choices[0].message.content)
-
-
-def call_anthropic(user_query, system_prompt, history):
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    messages = []
-    for m in history[-6:]:
-        messages.append({"role": m["role"], "content": m["content"]})
-    messages.append({"role": "user", "content": user_query})
-
-    resp = client.messages.create(
-        model="claude-sonnet-5",
-        max_tokens=2000,
-        system=system_prompt,
-        messages=messages,
-        temperature=0.4,
-    )
-    text = "".join(block.text for block in resp.content if block.type == "text")
-    return extract_json(text)
+    return extract_json(resp.choices[0].message.content)
 
 
 def rule_based_match(user_query, saved_places):
@@ -229,13 +223,11 @@ def rule_based_match(user_query, saved_places):
 
 def get_recommendations(user_query, saved_places, history):
     system_prompt = build_system_prompt(saved_places)
-    try:
-        if OPENAI_API_KEY:
-            return call_openai(user_query, system_prompt, history)
-        if ANTHROPIC_API_KEY:
-            return call_anthropic(user_query, system_prompt, history)
-    except Exception as exc:  # noqa: BLE001 - surface any provider error, then degrade gracefully
-        st.warning(f"LLM call failed ({exc}); falling back to offline keyword matching.")
+    if OPENROUTER_API_KEY:
+        try:
+            return call_openrouter(user_query, system_prompt, history)
+        except Exception as exc:  # noqa: BLE001 - surface any provider error, then degrade gracefully
+            st.warning(f"LLM call failed ({exc}); falling back to offline keyword matching.")
     return rule_based_match(user_query, saved_places)
 
 
@@ -332,7 +324,12 @@ def build_map(spots, saved_places):
             for p in saved_places
         ]
 
-    fmap = folium.Map(location=center, zoom_start=zoom, tiles="CartoDB positron")
+    fmap = folium.Map(
+        location=center,
+        zoom_start=zoom,
+        tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    )
 
     plotted = []
     for spot in display_spots:
@@ -373,7 +370,7 @@ def place_to_spot(place):
         "id": place["id"],
         "name": place["name"],
         "source": "saved",
-        "is_bookmarked": place["id"] in st.session_state.bookmarks,
+        "is_bookmarked": place["id"] in st.session_state.get("bookmarks", {}),
         "category": category,
         "neighborhood": place.get("neighborhood", ""),
         "cuisine": place.get("cuisine", []),
@@ -405,6 +402,164 @@ def filter_places(places, query, category):
         return query_lower in haystack
 
     return [p for p in places if matches(p)]
+
+
+# ---------------------------------------------------------------------------
+# Upload / import (session-scoped, no database - lives in st.session_state)
+# ---------------------------------------------------------------------------
+
+UPLOAD_CATEGORY = "Eats"  # uploaded lists don't carry the Bar/Cafe/Eats split our demo CSVs do
+
+
+def _placeholder_price_and_rating(name):
+    price_level = ["$", "$", "$$", "$$", "$$$"][int(enrich_places.deterministic_unit(name, "price") * 5)]
+    rating = round(4.0 + enrich_places.deterministic_unit(name, "rating") * 0.8, 1)
+    return price_level, rating
+
+
+def parse_uploaded_csv(uploaded_file, progress_bar=None, status=None):
+    """Parse a Google Maps list-export CSV (Title/URL columns), geocoding each
+    row via free Nominatim (rate-limited) with a synthetic-coordinate fallback.
+    Returns (places, skipped_count)."""
+    raw_bytes = uploaded_file.getvalue()
+    if not raw_bytes:
+        raise ValueError("The uploaded file is empty.")
+    try:
+        text = raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("Could not read this file as UTF-8 text.") from exc
+
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+        fieldnames = reader.fieldnames or []
+    except csv.Error as exc:
+        raise ValueError("Could not parse this as a CSV file.") from exc
+
+    fieldmap = {(fn or "").strip().lower(): fn for fn in fieldnames}
+    name_field = fieldmap.get("title") or fieldmap.get("name")
+    if not name_field:
+        raise ValueError("No 'Title' or 'name' column found — expected a Google Maps list export format.")
+    url_field = fieldmap.get("url")
+
+    rows = []
+    for row in reader:
+        name = (row.get(name_field) or "").strip()
+        if not name:
+            continue
+        url = (row.get(url_field) or "").strip() if url_field else ""
+        rows.append({"name": name, "url": url, "category": UPLOAD_CATEGORY})
+
+    if not rows:
+        raise ValueError("No places found in the uploaded CSV.")
+
+    rows = enrich_places.dedupe(rows)
+    enrich_places.assign_unique_ids(rows)
+
+    session = requests.Session()
+    n = len(rows)
+    places = []
+    for i, row in enumerate(rows):
+        name = row["name"]
+        if status is not None:
+            status.text(f"Geocoding {i + 1}/{n}: {name}…")
+
+        geo = enrich_places.nominatim_geocode(session, name)
+        time.sleep(enrich_places.NOMINATIM_DELAY_SECONDS)
+        if geo:
+            lat, lng, neighborhood = geo["lat"], geo["lng"], geo.get("neighborhood")
+            source = "nominatim"
+        else:
+            synth = enrich_places.synthetic_location(name)
+            lat, lng, neighborhood = synth["lat"], synth["lng"], synth["neighborhood"]
+            source = "offline_fallback"
+
+        price_level, rating = _placeholder_price_and_rating(name)
+        places.append({
+            "id": row["id"],
+            "name": name,
+            "category": UPLOAD_CATEGORY,
+            "neighborhood": neighborhood or "New York",
+            "cuisine": enrich_places.classify_cuisine(name, UPLOAD_CATEGORY),
+            "price_level": price_level,
+            "rating": rating,
+            "lat": round(float(lat), 4),
+            "lng": round(float(lng), 4),
+            "google_url": row.get("url", ""),
+            "notes": "Imported from your uploaded CSV.",
+            "happy_hour_info": "Not listed — check with the venue for current happy hour specials.",
+            "_enrichment_source": source,
+        })
+        if progress_bar is not None:
+            progress_bar.progress((i + 1) / n)
+
+    return places, 0
+
+
+def parse_uploaded_json(uploaded_file):
+    """Parse a Google Takeout 'Saved Places.json' export (a GeoJSON
+    FeatureCollection, coordinates as [lng, lat]) - already has real
+    coordinates, so no geocoding needed. Returns (places, skipped_count)."""
+    raw_bytes = uploaded_file.getvalue()
+    if not raw_bytes:
+        raise ValueError("The uploaded file is empty.")
+    try:
+        data = json.loads(raw_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Could not parse this as a JSON file.") from exc
+
+    if not isinstance(data, dict) or data.get("type") != "FeatureCollection" or not data.get("features"):
+        raise ValueError(
+            "This doesn't look like a Google Takeout 'Saved Places.json' export "
+            "(expected a GeoJSON FeatureCollection)."
+        )
+
+    raw_entries = []
+    skipped = 0
+    for feature in data["features"]:
+        try:
+            lng, lat = feature["geometry"]["coordinates"]
+            name = feature["properties"]["location"]["name"].strip()
+            if not name:
+                raise ValueError("blank name")
+        except (KeyError, TypeError, ValueError):
+            skipped += 1
+            continue
+        address = ((feature.get("properties") or {}).get("location") or {}).get("address", "")
+        raw_entries.append({"name": name, "lat": lat, "lng": lng, "address": address})
+
+    if not raw_entries:
+        raise ValueError("No usable places found in this file (entries are missing name/coordinates).")
+
+    enrich_places.assign_unique_ids(raw_entries)
+
+    places = []
+    for entry in raw_entries:
+        name = entry["name"]
+        price_level, rating = _placeholder_price_and_rating(name)
+        places.append({
+            "id": entry["id"],
+            "name": name,
+            "category": UPLOAD_CATEGORY,
+            "neighborhood": entry.get("address") or "New York",
+            "cuisine": enrich_places.classify_cuisine(name, UPLOAD_CATEGORY),
+            "price_level": price_level,
+            "rating": rating,
+            "lat": round(float(entry["lat"]), 4),
+            "lng": round(float(entry["lng"]), 4),
+            "google_url": "",
+            "notes": "Imported from your Google Takeout saved places.",
+            "happy_hour_info": "Not listed — check with the venue for current happy hour specials.",
+            "_enrichment_source": "takeout_json",
+        })
+
+    return places, skipped
+
+
+def get_active_places():
+    uploaded = st.session_state.get("uploaded_places")
+    if uploaded:
+        return uploaded
+    return load_places(DATA_PATH.stat().st_mtime)
 
 
 # ---------------------------------------------------------------------------
@@ -457,13 +612,16 @@ def render_sidebar():
         st.session_state.last_filters = []
         st.session_state.browse_query = ""
         st.session_state.browse_category = "All"
+        st.session_state.uploaded_places = None
+        st.session_state.upload_status = None
+        st.session_state._last_upload_sig = None
         st.rerun()
 
-    if not OPENAI_API_KEY and not ANTHROPIC_API_KEY:
+    if not OPENROUTER_API_KEY:
         st.sidebar.divider()
         st.sidebar.info(
-            "No OPENAI_API_KEY or ANTHROPIC_API_KEY set — running in offline "
-            "keyword-matching mode. See .env.example."
+            "No OPENROUTER_API_KEY set — running in offline keyword-matching mode. "
+            "See .env.example."
         )
 
 
@@ -486,7 +644,7 @@ def process_query(query, saved_places):
 
 
 def render_mode_toggle():
-    mode_cols = st.columns(2)
+    mode_cols = st.columns([1, 1, 0.7])
     if mode_cols[0].button(
         "💬 Concierge Chat", use_container_width=True,
         type="primary" if st.session_state.view_mode == "chat" else "secondary",
@@ -499,6 +657,49 @@ def render_mode_toggle():
     ):
         st.session_state.view_mode = "browse"
         st.rerun()
+    with mode_cols[2]:
+        render_import_popover()
+
+
+def render_import_popover():
+    with st.popover("📤 Import", use_container_width=True):
+        if st.session_state.uploaded_places:
+            st.caption(f"Using {len(st.session_state.uploaded_places)} uploaded spots instead of the demo dataset.")
+            if st.button("✕ Remove uploaded data (use demo dataset)", use_container_width=True):
+                st.session_state.uploaded_places = None
+                st.rerun()
+            st.divider()
+
+        uploaded_file = st.file_uploader(
+            "Import your own places",
+            type=["csv", "json"],
+            help=(
+                "CSV: a Google Maps list export (Title/URL columns) — geocoding takes "
+                "~1 sec/row, so a large list can take a couple minutes. "
+                "JSON: a Google Takeout 'Saved Places.json' export — imports instantly."
+            ),
+        )
+        if uploaded_file is not None:
+            file_sig = (uploaded_file.name, uploaded_file.size)
+            if st.session_state._last_upload_sig != file_sig:
+                st.session_state._last_upload_sig = file_sig
+                try:
+                    if uploaded_file.name.lower().endswith(".json"):
+                        with st.spinner("Parsing…"):
+                            places, skipped = parse_uploaded_json(uploaded_file)
+                    else:
+                        progress_bar = st.progress(0.0)
+                        status = st.empty()
+                        places, skipped = parse_uploaded_csv(uploaded_file, progress_bar, status)
+                except ValueError as exc:
+                    st.session_state.upload_status = ("error", f"Import failed: {exc}")
+                else:
+                    st.session_state.uploaded_places = places
+                    msg = f"{len(places)} spots imported"
+                    if skipped:
+                        msg += f" ({skipped} entries skipped — missing name or coordinates)"
+                    st.session_state.upload_status = ("success", msg)
+                st.rerun()
 
 
 def render_chat_view(saved_places):
@@ -575,13 +776,16 @@ def render_browse_view(saved_places):
 
 
 def main():
-    init_state()
-    saved_places = load_places(DATA_PATH.stat().st_mtime)
+    saved_places = get_active_places()
+    init_state(saved_places)
 
     st.title("🍽️ NYC Dining Concierge")
-    st.caption(
-        f"{len(saved_places)} saved NYC spots — chat for curated picks, or search and filter the full list."
-    )
+    if st.session_state.uploaded_places:
+        st.caption(f"{len(saved_places)} spots from your uploaded list — chat for curated picks, or search and filter.")
+    else:
+        st.caption(
+            f"{len(saved_places)} saved NYC spots — chat for curated picks, or search and filter the full list."
+        )
 
     render_sidebar()
 
@@ -589,6 +793,10 @@ def main():
 
     with left:
         render_mode_toggle()
+        if st.session_state.upload_status:
+            kind, msg = st.session_state.upload_status
+            (st.success if kind == "success" else st.error)(msg)
+            st.session_state.upload_status = None
         st.divider()
         if st.session_state.view_mode == "browse":
             map_spots = render_browse_view(saved_places)

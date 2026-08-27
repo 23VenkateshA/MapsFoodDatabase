@@ -18,7 +18,16 @@ to an interactive Folium map, with bookmarking and light itinerary building.
   and only falls back to general NYC knowledge when there aren't enough good matches (flagging
   `fallback_triggered` and using your saved favorites to anchor the style of any fallback picks).
 - **Bookmarking & itinerary** — toggle spots as bookmarks, add them to a running itinerary with
-  best time slots and durations, manage both from the sidebar.
+  best time slots and durations, manage both from the sidebar. A few demo bookmarks and one
+  itinerary stop are pre-seeded on first load so the app doesn't look empty before you've done
+  anything; Clear/Reset in the sidebar work normally afterward and won't re-seed.
+- **Bring your own places** — click **📤 Import** to upload your own place list instead of the
+  158-spot demo dataset, scoped to your browser session (nothing is written to a database or
+  shared with other visitors — it's held in `st.session_state` and lost on a page reload). Two
+  formats are supported: a Google Maps list-export CSV (`Title`/`URL` columns — each row is
+  geocoded via free OpenStreetMap Nominatim, so a large list takes a while, shown with a progress
+  bar), or a Google Takeout `Saved Places.json` export (already has real coordinates, so it
+  imports instantly). Click "✕ Remove uploaded data" to go back to the demo dataset.
 - **Offline mode** — with no API key configured, the app still runs end-to-end using a
   rule-based keyword matcher against your saved list.
 
@@ -32,7 +41,8 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` and set `OPENAI_API_KEY` (preferred) or `ANTHROPIC_API_KEY`. Leave both blank to run
+Edit `.env` and set `OPENROUTER_API_KEY` (get one at [openrouter.ai](https://openrouter.ai) — it's
+OpenAI-API-compatible and can route to many providers/models with one key). Leave it blank to run
 in offline keyword-matching mode.
 
 Run the app:
