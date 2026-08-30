@@ -2,4 +2,16 @@ venv/
 __pycache__/
 *.pyc
 .env
+.env.local
 .DS_Store
+
+# backend
+backend/venv/
+backend/data/app.db
+
+# frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
