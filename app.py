@@ -58,7 +58,9 @@ CUSTOM_CSS = (
     "  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px; --space-8: 32px;"
     "}"
     # Single sans-serif family everywhere, no mixed serif/sans.
-    'html, body, .stApp, .stApp p, .stApp span:not([role="img"]), .stApp div, .stApp li,'
+    'html, body, .stApp, .stApp p,'
+    '.stApp span:not([role="img"]):not([data-testid="stIconMaterial"]),'
+    ' .stApp div, .stApp li,'
     '[data-testid="stCaptionContainer"], [data-testid="stMarkdownContainer"],'
     '[data-testid="stButton"] button, [data-testid="stWidgetLabel"], [data-testid="stChatInput"] textarea {'
     "  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;"
