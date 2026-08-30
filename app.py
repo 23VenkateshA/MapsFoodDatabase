@@ -17,6 +17,7 @@ import folium
 import requests
 import streamlit as st
 from dotenv import load_dotenv
+from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 
 import enrich_places
@@ -33,95 +34,170 @@ SEED_ITINERARY_ID = "cello-s-pizzeria"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = "openai/gpt-4o-mini"
 
-st.set_page_config(page_title="NYC Dining Concierge", page_icon="🍽️", layout="wide")
+st.set_page_config(page_title="NYC Dining Concierge", page_icon=":material/restaurant:", layout="wide")
 
 
 CUSTOM_CSS = (
     '<link rel="preconnect" href="https://fonts.googleapis.com">'
     '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-    '<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600'
-    '&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">'
+    '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"'
+    ' rel="stylesheet">'
     "<style>"
     ":root {"
-    "  --nyc-accent: #D97757;"
-    "  --nyc-saved: #7FB08F;"
-    "  --nyc-saved-bg: rgba(127, 176, 143, 0.16);"
-    "  --nyc-curated: #E0AE5C;"
-    "  --nyc-curated-bg: rgba(224, 174, 92, 0.16);"
-    "  --nyc-border: rgba(243, 236, 230, 0.14);"
-    "  --nyc-muted: rgba(243, 236, 230, 0.62);"
+    "  --nyc-accent: #4285F4;"
+    "  --nyc-accent-soft: rgba(66, 133, 244, 0.14);"
+    "  --nyc-accent-text: #8AB4F8;"
+    "  --nyc-green: #34A853;"
+    "  --nyc-surface: #202124;"
+    "  --nyc-surface-elevated: #2D2E30;"
+    "  --nyc-surface-variant: #35363A;"
+    "  --nyc-outline: #3C4043;"
+    "  --nyc-text: #E8EAED;"
+    "  --nyc-text-muted: #9AA0A6;"
+    "  --nyc-radius: 8px;"
+    "  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px; --space-8: 32px;"
     "}"
-    "html, body, .stApp, .stApp p, .stApp span, .stApp div,"
+    # Single sans-serif family everywhere, no mixed serif/sans.
+    'html, body, .stApp, .stApp p, .stApp span:not([role="img"]), .stApp div, .stApp li,'
     '[data-testid="stCaptionContainer"], [data-testid="stMarkdownContainer"],'
-    '[data-testid="stButton"] button, [data-testid="stWidgetLabel"] {'
+    '[data-testid="stButton"] button, [data-testid="stWidgetLabel"], [data-testid="stChatInput"] textarea {'
     "  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;"
     "}"
-    '[data-testid="stAppViewContainer"] h1, [data-testid="stAppViewContainer"] h2,'
-    '[data-testid="stAppViewContainer"] h3, [data-testid="stSidebar"] h1,'
-    '[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {'
-    "  font-family: 'Fraunces', Georgia, serif;"
-    "  font-weight: 600;"
-    "  text-wrap: balance;"
-    "  letter-spacing: -0.01em;"
+    # Type scale: H1 28/700, H2 22/600, H3 16/600, body 14/400, caption 12/400.
+    '[data-testid="stAppViewContainer"] h1, [data-testid="stSidebar"] h1 {'
+    "  font-size: 28px !important; font-weight: 700 !important; text-wrap: balance;"
+    "  letter-spacing: -0.01em; text-align: left;"
     "}"
-    '[data-testid="stCaptionContainer"] { color: var(--nyc-muted) !important; }'
+    '[data-testid="stAppViewContainer"] h2, [data-testid="stSidebar"] h2 {'
+    "  font-size: 22px !important; font-weight: 600 !important; text-wrap: balance; text-align: left;"
+    "}"
+    '[data-testid="stAppViewContainer"] h3, [data-testid="stSidebar"] h3 {'
+    "  font-size: 16px !important; font-weight: 600 !important; text-align: left;"
+    "}"
+    '.stApp, [data-testid="stMarkdownContainer"] p { font-size: 14px; font-weight: 400; }'
+    '[data-testid="stCaptionContainer"] { font-size: 12px !important; color: var(--nyc-text-muted) !important; }'
+    # Section header row: title + count pill, left-aligned, consistent spacing.
+    ".nyc-section-header {"
+    "  display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) 0;"
+    "}"
+    ".nyc-section-header h2, .nyc-section-header h3 { margin: 0 !important; }"
+    ".nyc-count-pill {"
+    "  display: inline-flex; align-items: center; justify-content: center;"
+    "  min-width: 22px; height: 20px; padding: 0 var(--space-2);"
+    "  border-radius: 999px; background: var(--nyc-surface-variant); color: var(--nyc-text-muted);"
+    "  font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;"
+    "}"
+    # Focus states.
     '[data-testid="stButton"] button:focus-visible, [data-testid="stLinkButton"] a:focus-visible,'
     '[data-testid="stTextInput"] input:focus-visible,'
     '[data-testid="stFileUploaderDropzone"]:focus-within {'
     "  outline: 2px solid var(--nyc-accent) !important;"
     "  outline-offset: 2px;"
     "}"
+    # Buttons: one radius token, flat fill (no gradients), subtle hover/active tint only.
+    '[data-testid="stButton"] button, [data-testid="stLinkButton"] a, [data-testid="stBaseButton-primary"],'
+    '[data-testid="stBaseButton-secondary"], [data-testid="stFileUploaderDropzone"], [data-testid="stTextInput"] input,'
+    '[data-testid="stChatInput"] {'
+    "  border-radius: var(--nyc-radius) !important;"
+    "  transition: background-color 120ms ease, filter 120ms ease;"
+    "}"
     '[data-testid="stButton"] button, [data-testid="stLinkButton"] a {'
-    "  transition: transform 120ms ease, box-shadow 120ms ease;"
+    "  font-weight: 500; height: 38px;"
     "}"
     '[data-testid="stButton"] button:hover, [data-testid="stLinkButton"] a:hover {'
-    "  transform: translateY(-1px);"
-    "  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);"
+    "  filter: brightness(1.12);"
+    "}"
+    "@media (prefers-reduced-motion: reduce) {"
+    '  [data-testid="stButton"] button, [data-testid="stLinkButton"] a { transition: none !important; }'
     "}"
     # Recommendation/browse cards: st.container(border=True) whose first child carries a
     # .nyc-card-marker sentinel, scoped via :has() since Streamlit's own stVerticalBlock
-    # testid is shared with every non-card wrapper too.
+    # testid is shared with every non-card wrapper too. Flat surface tint, no border.
     '[data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .nyc-card-marker) {'
-    "  border-radius: 14px !important;"
-    "  border-color: var(--nyc-border) !important;"
-    "  padding: 6px 8px !important;"
-    "  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;"
+    "  border: none !important;"
+    "  border-radius: var(--nyc-radius) !important;"
+    "  background: var(--nyc-surface-elevated) !important;"
+    "  padding: var(--space-3) var(--space-4) !important;"
+    "  transition: background-color 120ms ease;"
     "}"
     '[data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .nyc-card-marker):hover {'
-    "  transform: translateY(-2px);"
-    "  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);"
-    "  border-color: var(--nyc-accent) !important;"
+    "  background: var(--nyc-surface-variant) !important;"
     "}"
-    "@media (prefers-reduced-motion: reduce) {"
-    '  [data-testid="stButton"] button, [data-testid="stLinkButton"] a,'
-    '  [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .nyc-card-marker) {'
-    "    transition: none !important;"
-    "  }"
-    '  [data-testid="stButton"] button:hover, [data-testid="stLinkButton"] a:hover,'
-    '  [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .nyc-card-marker):hover {'
-    "    transform: none !important;"
-    "    box-shadow: none !important;"
-    "  }"
+    # Sidebar list rows (bookmarks/itinerary): same sentinel + :has() pattern, Gmail/Drive-style
+    # hover tint since these aren't real HTML rows, just Streamlit columns.
+    '[data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .nyc-row-marker) {'
+    "  border-radius: var(--nyc-radius); padding: var(--space-1) var(--space-2);"
+    "  transition: background-color 120ms ease;"
     "}"
+    '[data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .nyc-row-marker):hover {'
+    "  background-color: var(--nyc-surface-variant);"
+    "}"
+    # Chips: one accent (blue) for the "yours" status, neutral gray for everything else -
+    # color used for meaning (ownership), not decoration.
     ".nyc-chip {"
-    "  display: inline-block;"
-    "  padding: 3px 10px;"
-    "  border-radius: 999px;"
-    "  font-size: 0.72rem;"
-    "  font-weight: 600;"
-    "  text-transform: uppercase;"
-    "  letter-spacing: 0.04em;"
-    "  white-space: nowrap;"
+    "  display: inline-flex; align-items: center; gap: 4px;"
+    "  padding: 3px var(--space-2); border-radius: 999px;"
+    "  font-size: 12px; font-weight: 600; white-space: nowrap;"
     "}"
-    ".nyc-chip-saved { background: var(--nyc-saved-bg); color: var(--nyc-saved); }"
-    ".nyc-chip-curated { background: var(--nyc-curated-bg); color: var(--nyc-curated); }"
+    ".nyc-chip-saved { background: var(--nyc-accent-soft); color: var(--nyc-accent-text); }"
+    ".nyc-chip-curated { background: var(--nyc-surface-variant); color: var(--nyc-text-muted); }"
     ".nyc-rating { font-variant-numeric: tabular-nums; font-weight: 600; }"
+    # Empty states.
+    ".nyc-empty-state {"
+    "  display: flex; flex-direction: column; align-items: center; justify-content: center;"
+    "  gap: var(--space-2); padding: var(--space-6) var(--space-4); text-align: center;"
+    "  color: var(--nyc-text-muted);"
+    "}"
+    ".nyc-empty-state .material-symbols-outlined { font-size: 32px; color: var(--nyc-text-muted); }"
     "</style>"
 )
 
 
 def inject_custom_css():
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+# Inline SVGs for the handful of icons embedded inside raw HTML we construct ourselves
+# (chip badges, card header). Streamlit's `:material/name:` shortcode syntax only expands
+# in Streamlit's own widget-label/markdown text pipeline - verified live that it renders as
+# a broken glyph when placed inside a <span> we build via unsafe_allow_html, so those spots
+# use real SVG instead, matching the "fix by switching to native syntax or inline SVG" note.
+ICON_BOOKMARK = (
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px">'
+    '<path d="M17 3H7a2 2 0 0 0-2 2v16l7-3 7 3V5a2 2 0 0 0-2-2z"/></svg>'
+)
+ICON_SPARKLE = (
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px">'
+    '<path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z"/>'
+    '<path d="M19 15l.7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7L19 15z"/></svg>'
+)
+ICON_STAR = (
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px">'
+    '<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>'
+)
+ICON_LOCATION = (
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px">'
+    '<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>'
+)
+ICON_LIGHTBULB = (
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px">'
+    '<path d="M9 21h6v-1H9v1zm3-19a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2z"/></svg>'
+)
+ICON_CHAT_LARGE = (
+    '<svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" class="material-symbols-outlined">'
+    '<path d="M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H8l-4 4V6a1 1 0 0 1 1-1z"/></svg>'
+)
+ICON_SEARCH_LARGE = (
+    '<svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" class="material-symbols-outlined">'
+    '<path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16'
+    'a6.47 6.47 0 0 0 4.23-1.57l.27.28v.79l5 5L20.49 19l-5-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>'
+)
+
+EXAMPLE_PROMPTS = [
+    "Asian happy hour in East Village",
+    "Group dinner for 6",
+    "Best pizza in Alphabet City",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -327,9 +403,9 @@ def render_spot_card(spot, idx):
     sid = spot.get("id", f"spot-{idx}")
     is_bookmarked = sid in st.session_state.bookmarks
     if spot.get("source") == "saved":
-        badge_html = '<span class="nyc-chip nyc-chip-saved">🔖 Saved</span>'
+        badge_html = f'<span class="nyc-chip nyc-chip-saved">{ICON_BOOKMARK} Saved</span>'
     else:
-        badge_html = '<span class="nyc-chip nyc-chip-curated">✨ Curated Pick</span>'
+        badge_html = f'<span class="nyc-chip nyc-chip-curated">{ICON_SPARKLE} Curated Pick</span>'
     key_base = f"{sid}-{idx}"
 
     with st.container(border=True):
@@ -337,10 +413,10 @@ def render_spot_card(spot, idx):
         header_cols = st.columns([5, 2])
         with header_cols[0]:
             st.markdown(
-                f"**{spot.get('name', 'Unknown')}**   "
-                f"⭐ <span class='nyc-rating'>{spot.get('rating', '—')}</span>"
-                f"   {spot.get('price_level', '$')}"
-                f"   📍 {spot.get('neighborhood', '—')}",
+                f"**{spot.get('name', 'Unknown')}**   "
+                f"{ICON_STAR} <span class='nyc-rating'>{spot.get('rating', '—')}</span>"
+                f"   {spot.get('price_level', '$')}"
+                f"   {ICON_LOCATION} {spot.get('neighborhood', '—')}",
                 unsafe_allow_html=True,
             )
         with header_cols[1]:
@@ -352,7 +428,7 @@ def render_spot_card(spot, idx):
 
         highlight = spot.get("match_highlight")
         if highlight:
-            st.markdown(f"💡 {highlight}")
+            st.markdown(f"{ICON_LIGHTBULB} {highlight}", unsafe_allow_html=True)
 
         itin = spot.get("itinerary_context") or {}
         if itin.get("best_time_slot"):
@@ -361,7 +437,7 @@ def render_spot_card(spot, idx):
         toolbar = st.columns(4)
 
         with toolbar[0]:
-            label = "★ Saved" if is_bookmarked else "☆ Bookmark"
+            label = ":material/bookmark: Saved" if is_bookmarked else ":material/bookmark_border: Bookmark"
             if st.button(label, key=f"bm-{key_base}"):
                 if is_bookmarked:
                     st.session_state.bookmarks.pop(sid, None)
@@ -386,12 +462,46 @@ def render_spot_card(spot, idx):
         with toolbar[3]:
             already_in_itinerary = any(i.get("id") == sid for i in st.session_state.itinerary)
             if st.button(
-                "✓ In itinerary" if already_in_itinerary else "+ Itinerary",
+                ":material/check: In itinerary" if already_in_itinerary else ":material/add: Itinerary",
                 key=f"itin-{key_base}",
                 disabled=already_in_itinerary,
             ):
                 st.session_state.itinerary.append(spot)
                 st.rerun()
+
+
+MAP_ACCENT_BLUE = "#4285F4"
+MAP_ACCENT_GREEN = "#34A853"
+
+# Floating legend overlay, Google-Maps-style. st_folium renders the map in its own iframe
+# with an isolated document, so the page-level CUSTOM_CSS above never reaches it - this
+# style/markup has to travel with the map's own root HTML instead.
+MAP_LEGEND_HTML = (
+    "<style>"
+    ".nyc-map-legend {"
+    "  position: absolute; bottom: 12px; left: 12px; z-index: 1000;"
+    "  background: rgba(32, 33, 36, 0.92); color: #E8EAED;"
+    "  border-radius: 8px; padding: 8px 12px;"
+    "  font-family: 'Inter', -apple-system, sans-serif; font-size: 12px;"
+    "  display: flex; flex-direction: column; gap: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.4);"
+    "}"
+    ".nyc-map-legend .row { display: flex; align-items: center; gap: 6px; }"
+    ".nyc-map-legend .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }"
+    "</style>"
+    '<div class="nyc-map-legend">'
+    f'<div class="row"><span class="dot" style="background:{MAP_ACCENT_BLUE};"></span>Saved spots</div>'
+    f'<div class="row"><span class="dot" style="background:{MAP_ACCENT_GREEN};"></span>Fallback picks</div>'
+    "</div>"
+)
+
+
+def _dot_icon(color_hex):
+    """Minimal single-color dot marker (no default Leaflet pin/shadow), Google-Maps-style."""
+    html = (
+        f'<div style="width:14px;height:14px;border-radius:50%;background:{color_hex};'
+        'border:2px solid #202124;box-shadow:0 1px 2px rgba(0,0,0,0.5);"></div>'
+    )
+    return folium.DivIcon(html=html, icon_size=(14, 14), icon_anchor=(7, 7))
 
 
 def build_map(spots, saved_places):
@@ -425,17 +535,17 @@ def build_map(spots, saved_places):
         attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     )
 
+    # Overlapping pins collapse into numbered cluster circles at low zoom - additive,
+    # doesn't change what's plotted or how spots/saved_places are computed.
+    cluster = MarkerCluster(name="places").add_to(fmap)
+
     plotted = []
     for spot in display_spots:
         coords = spot.get("coordinates")
         if not coords or coords.get("lat") is None:
             continue
         source = spot.get("source", "saved")
-        icon = folium.Icon(
-            color="blue" if source == "saved" else "green",
-            icon="cutlery" if source == "saved" else "star",
-            prefix="fa",
-        )
+        icon = _dot_icon(MAP_ACCENT_BLUE if source == "saved" else MAP_ACCENT_GREEN)
         popup_html = (
             f"<b>{spot.get('name')}</b><br>{spot.get('neighborhood', '')}<br>"
             f"{spot.get('match_highlight', '')}"
@@ -445,11 +555,13 @@ def build_map(spots, saved_places):
             tooltip=spot.get("name"),
             popup=folium.Popup(popup_html, max_width=250),
             icon=icon,
-        ).add_to(fmap)
+        ).add_to(cluster)
         plotted.append((coords["lat"], coords["lng"]))
 
     if len(plotted) > 1:
         fmap.fit_bounds(plotted, padding=(30, 30))
+
+    fmap.get_root().html.add_child(folium.Element(MAP_LEGEND_HTML))
 
     return fmap
 
@@ -660,22 +772,34 @@ def get_active_places():
 # Sidebar
 # ---------------------------------------------------------------------------
 
-def render_sidebar():
-    st.sidebar.title("🍽️ Your NYC Concierge")
+def render_section_header(container, title, count):
+    container.markdown(
+        f'<div class="nyc-section-header"><h3>{title}</h3>'
+        f'<span class="nyc-count-pill">{count}</span></div>',
+        unsafe_allow_html=True,
+    )
 
-    st.sidebar.subheader(f"Bookmarked ({len(st.session_state.bookmarks)})")
+
+def render_sidebar():
+    st.sidebar.title(":material/restaurant: Your NYC Concierge")
+
+    render_section_header(st.sidebar, "Bookmarked", len(st.session_state.bookmarks))
     if not st.session_state.bookmarks:
         st.sidebar.caption("No saved spots yet — bookmark a card to see it here.")
     else:
         for sid, spot in list(st.session_state.bookmarks.items()):
             cols = st.sidebar.columns([4, 1])
-            cols[0].markdown(f"**{spot.get('name')}** · {spot.get('neighborhood', '')}")
-            if cols[1].button("✕", key=f"unbm-{sid}", help=f"Remove {spot.get('name', 'this spot')} from bookmarks"):
+            cols[0].markdown(
+                f'<span class="nyc-row-marker"></span>'
+                f"**{spot.get('name')}** · {spot.get('neighborhood', '')}",
+                unsafe_allow_html=True,
+            )
+            if cols[1].button(":material/close:", key=f"unbm-{sid}", help=f"Remove {spot.get('name', 'this spot')} from bookmarks"):
                 st.session_state.bookmarks.pop(sid, None)
                 st.rerun()
 
     st.sidebar.divider()
-    st.sidebar.subheader(f"Itinerary ({len(st.session_state.itinerary)})")
+    render_section_header(st.sidebar, "Itinerary", len(st.session_state.itinerary))
     if not st.session_state.itinerary:
         st.sidebar.caption("No stops added yet — use “+ Itinerary” on a card.")
     else:
@@ -684,8 +808,12 @@ def render_sidebar():
             cols = st.sidebar.columns([4, 1])
             time_slot = itin.get("best_time_slot", "Time TBD")
             duration = itin.get("estimated_duration_min", "?")
-            cols[0].markdown(f"**{idx + 1}. {spot.get('name')}**  \n{time_slot} · ~{duration} min")
-            if cols[1].button("✕", key=f"unitin-{idx}", help=f"Remove {spot.get('name', 'this stop')} from itinerary"):
+            cols[0].markdown(
+                f'<span class="nyc-row-marker"></span>'
+                f"**{idx + 1}. {spot.get('name')}**  \n{time_slot} · ~{duration} min",
+                unsafe_allow_html=True,
+            )
+            if cols[1].button(":material/close:", key=f"unitin-{idx}", help=f"Remove {spot.get('name', 'this stop')} from itinerary"):
                 st.session_state.itinerary.pop(idx)
                 st.rerun()
 
@@ -740,13 +868,13 @@ def process_query(query, saved_places):
 def render_mode_toggle():
     mode_cols = st.columns([1, 1, 0.9])
     if mode_cols[0].button(
-        "💬 Concierge Chat", use_container_width=True,
+        ":material/chat: Concierge Chat", use_container_width=True,
         type="primary" if st.session_state.view_mode == "chat" else "secondary",
     ):
         st.session_state.view_mode = "chat"
         st.rerun()
     if mode_cols[1].button(
-        "🔎 Browse All Spots", use_container_width=True,
+        ":material/search: Browse All Spots", use_container_width=True,
         type="primary" if st.session_state.view_mode == "browse" else "secondary",
     ):
         st.session_state.view_mode = "browse"
@@ -756,10 +884,10 @@ def render_mode_toggle():
 
 
 def render_import_popover():
-    with st.popover("📤 Import", use_container_width=True):
+    with st.popover(":material/upload: Import", use_container_width=True):
         if st.session_state.uploaded_places:
             st.caption(f"Using {len(st.session_state.uploaded_places)} uploaded spots instead of the demo dataset.")
-            if st.button("✕ Remove uploaded data (use demo dataset)", use_container_width=True):
+            if st.button(":material/close: Remove uploaded data (use demo dataset)", use_container_width=True):
                 st.session_state.uploaded_places = None
                 st.rerun()
             st.divider()
@@ -799,9 +927,21 @@ def render_import_popover():
 def render_chat_view(saved_places):
     chat_box = st.container(height=380, border=True)
     with chat_box:
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+        if not st.session_state.messages:
+            st.markdown(
+                f'<div class="nyc-empty-state">{ICON_CHAT_LARGE}'
+                "<div>Ask about a vibe, neighborhood, or occasion — try one below.</div></div>",
+                unsafe_allow_html=True,
+            )
+            example_cols = st.columns(len(EXAMPLE_PROMPTS))
+            for i, prompt_text in enumerate(EXAMPLE_PROMPTS):
+                if example_cols[i].button(prompt_text, key=f"example-{i}", use_container_width=True):
+                    st.session_state.pending_query = prompt_text
+                    st.rerun()
+        else:
+            for msg in st.session_state.messages:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
 
     if st.session_state.last_filters:
         st.write("Quick filters:")
@@ -822,11 +962,15 @@ def render_chat_view(saved_places):
         st.rerun()
 
     st.divider()
-    st.subheader(f"Recommendations ({len(st.session_state.last_spots)})")
+    render_section_header(st, "Recommendations", len(st.session_state.last_spots))
     if st.session_state.last_summary:
         st.info(st.session_state.last_summary)
     if not st.session_state.last_spots:
-        st.caption("Ask a question above to get recommendations.")
+        st.markdown(
+            f'<div class="nyc-empty-state">{ICON_SEARCH_LARGE}'
+            "<div>Ask a question above to get recommendations.</div></div>",
+            unsafe_allow_html=True,
+        )
     else:
         for idx, spot in enumerate(st.session_state.last_spots):
             render_spot_card(spot, idx)
@@ -854,9 +998,13 @@ def render_browse_view(saved_places):
     spots = [place_to_spot(p) for p in filtered]
 
     st.divider()
-    st.subheader(f"Browse ({len(spots)} of {len(saved_places)})")
+    render_section_header(st, "Browse", f"{len(spots)} of {len(saved_places)}")
     if not spots:
-        st.caption("No spots match your search — try a different keyword or category.")
+        st.markdown(
+            f'<div class="nyc-empty-state">{ICON_SEARCH_LARGE}'
+            "<div>No spots match your search — try a different keyword or category.</div></div>",
+            unsafe_allow_html=True,
+        )
     else:
         if len(spots) > BROWSE_CARD_LIMIT:
             st.caption(
@@ -874,7 +1022,7 @@ def main():
     saved_places = get_active_places()
     init_state(saved_places)
 
-    st.title("🍽️ NYC Dining Concierge")
+    st.title(":material/restaurant: NYC Dining Concierge")
     if st.session_state.uploaded_places:
         st.caption(f"{len(saved_places)} spots from your uploaded list — chat for curated picks, or search and filter.")
     else:
@@ -902,7 +1050,6 @@ def main():
         st.subheader("Map")
         fmap = build_map(map_spots, saved_places)
         st_folium(fmap, height=560, use_container_width=True, key="dining_map")
-        st.caption("🔵 Blue = your saved spots · 🟢 Green = curated fallback picks")
 
 
 if __name__ == "__main__":
