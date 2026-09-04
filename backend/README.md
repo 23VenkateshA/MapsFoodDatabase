@@ -33,16 +33,42 @@ below is documented there with live request/response examples).
 | GET | `/session` | Bootstrap payload: bookmarks, itinerary, active-dataset info. Also sets the `nyc_concierge_session` cookie on first call. |
 | POST | `/session/reset` | Mirrors "Reset entire session" — clears bookmarks, itinerary, and any uploaded dataset. Does not re-seed the demo data. |
 | POST | `/chat` | `{query, history}` → recommendations. Same two-tier OpenRouter/offline-fallback behavior as the original. |
-| GET | `/spots?q=&category=` | Browse/filter the active dataset (demo or uploaded). |
+| GET | `/spots?q=&category=&address_id=&lat=&lng=&radius_miles=&sort=` | Browse/filter the active dataset. `address_id` (or raw `lat`/`lng`) annotates each result with `distance_miles`/`walk_minutes` from that point; `radius_miles` drops anything farther; `sort=distance` orders by it. No anchor param → identical to the original behavior. |
 | GET | `/spots/{id}` | Single spot detail. |
 | GET/POST | `/bookmarks` | List / add. POST accepts a full spot payload (not just an id) since fallback/LLM spots may not exist in the base dataset. |
 | DELETE | `/bookmarks/{id}` | Remove one. |
 | POST | `/bookmarks/reset` | Mirrors "Clear bookmarks". |
-| GET/POST | `/itinerary` | List / append a stop. |
+| GET/POST | `/itinerary` | List / append a stop. Returns each stop wrapped with computed `arrival_time`/`departure_time`/`travel_to_next_minutes`/`timing_warning` (see "Itinerary scheduling" below). |
 | DELETE | `/itinerary/{id}` | Remove one. |
 | POST | `/itinerary/reset` | Mirrors "Clear itinerary". |
+| GET/POST | `/addresses` | List / save a home-or-other anchor address (geocoded via Nominatim on save). |
+| DELETE | `/addresses/{id}` | Remove a saved address. |
+| PUT | `/addresses/{id}/default` | Mark one address as the default anchor. |
 | POST | `/import` | Multipart file upload — Google Maps CSV export or Google Takeout `Saved Places.json`. Replaces the session's entire active dataset. |
 | POST | `/import/reset` | Mirrors "✕ Remove uploaded data" — reverts to the demo dataset. |
+
+## Itinerary scheduling
+
+`services/itinerary_service.py` computes a timeline for `GET/POST /itinerary`
+and the `/session` bootstrap payload: stops are scheduled back-to-back
+starting from the first stop's own `best_time_slot`, with travel time between
+consecutive stops estimated from straight-line distance at an assumed 3 mph
+walking speed (no paid routing API — see "Distance & travel time" below).
+There's no user-editable arrival-time override anywhere in this app, so
+`timing_warning` instead flags a stop whose *computed* arrival lands outside
+its own `best_time_slot` window (e.g. a cafe's 9-11 AM slot getting pushed to
+evening by earlier stops) — the closest equivalent derivable without adding
+new scheduling UI.
+
+## Distance & travel time
+
+Both the `/spots` radius search and itinerary travel time use free,
+no-API-key services: Nominatim (OpenStreetMap) for geocoding addresses, and a
+straight-line-distance/3-mph-walk estimate for everything travel-time-related
+— no paid routing API (e.g. Google Distance Matrix, OSRM) is wired in. This
+trades some accuracy (no real streets/detours) for zero cost and no new
+external dependency; swap in a routing API here if production-grade estimates
+matter more than that tradeoff.
 
 ## Session model
 

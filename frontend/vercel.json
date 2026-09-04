@@ -1,5 +1,0 @@
-{
-  "env": {
-    "NEXT_PUBLIC_API_URL": "@nyc_concierge_api_url"
-  }
-}

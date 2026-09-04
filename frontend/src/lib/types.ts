@@ -30,6 +30,30 @@ export interface Spot {
   coordinates: Coordinates;
   links: Links;
   itinerary_context: ItineraryContext;
+  distance_miles: number | null;
+  walk_minutes: number | null;
+}
+
+export interface Address {
+  id: string;
+  label: string;
+  address: string;
+  lat: number;
+  lng: number;
+  is_default: boolean;
+}
+
+export interface AddressIn {
+  label: string;
+  address: string;
+}
+
+export interface ItineraryStop {
+  spot: Spot;
+  arrival_time: string;
+  departure_time: string;
+  travel_to_next_minutes: number | null;
+  timing_warning: string | null;
 }
 
 export interface ChatMessage {
@@ -46,7 +70,7 @@ export interface ChatResponse {
 
 export interface SessionState {
   bookmarks: Spot[];
-  itinerary: Spot[];
+  itinerary: ItineraryStop[];
   has_custom_dataset: boolean;
   active_spot_count: number;
   demo_spot_count: number;

@@ -49,6 +49,10 @@ def init_db() -> None:
             "PRIMARY KEY (session_id, spot_id))"
         )
         conn.execute("CREATE TABLE IF NOT EXISTS uploaded_dataset (session_id TEXT PRIMARY KEY, places_json TEXT)")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS addresses (session_id TEXT, address_id TEXT, label TEXT, address TEXT, "
+            "lat REAL, lng REAL, is_default INTEGER DEFAULT 0, PRIMARY KEY (session_id, address_id))"
+        )
 
 
 def ensure_session_seeded(session_id: str) -> None:
@@ -169,6 +173,63 @@ def get_active_places(session_id: str) -> list[dict]:
     entirely when present, otherwise the demo dataset."""
     uploaded = get_uploaded_places(session_id)
     return uploaded if uploaded else load_demo_places()
+
+
+def _address_row(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["address_id"],
+        "label": row["label"],
+        "address": row["address"],
+        "lat": row["lat"],
+        "lng": row["lng"],
+        "is_default": bool(row["is_default"]),
+    }
+
+
+def get_addresses(session_id: str) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT address_id, label, address, lat, lng, is_default FROM addresses "
+            "WHERE session_id = ? ORDER BY is_default DESC, rowid ASC",
+            (session_id,),
+        ).fetchall()
+    return [_address_row(r) for r in rows]
+
+
+def get_address(session_id: str, address_id: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT address_id, label, address, lat, lng, is_default FROM addresses "
+            "WHERE session_id = ? AND address_id = ?",
+            (session_id, address_id),
+        ).fetchone()
+    return _address_row(row) if row else None
+
+
+def add_address(session_id: str, address_id: str, label: str, raw_address: str, lat: float, lng: float) -> None:
+    with _connect() as conn:
+        is_first = (
+            conn.execute("SELECT COUNT(*) AS n FROM addresses WHERE session_id = ?", (session_id,)).fetchone()["n"]
+            == 0
+        )
+        conn.execute(
+            "INSERT INTO addresses (session_id, address_id, label, address, lat, lng, is_default) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (session_id, address_id, label, raw_address, lat, lng, 1 if is_first else 0),
+        )
+
+
+def delete_address(session_id: str, address_id: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM addresses WHERE session_id = ? AND address_id = ?", (session_id, address_id))
+
+
+def set_default_address(session_id: str, address_id: str) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE addresses SET is_default = 0 WHERE session_id = ?", (session_id,))
+        conn.execute(
+            "UPDATE addresses SET is_default = 1 WHERE session_id = ? AND address_id = ?", (session_id, address_id)
+        )
 
 
 def reset_session(session_id: str) -> None:

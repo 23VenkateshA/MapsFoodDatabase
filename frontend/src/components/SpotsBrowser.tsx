@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
+import { useAppState } from "@/lib/app-state";
 import type { CategoryFilter, Spot } from "@/lib/types";
 import { SectionHeader } from "./CountPill";
 import { SpotCard } from "./SpotCard";
@@ -25,6 +26,7 @@ export function SpotsBrowser({
   onSpotsChange: (spots: Spot[]) => void;
   demoSpotCount: number;
 }) {
+  const { activeAddressId, radiusMiles } = useAppState();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("All");
   const [spots, setSpots] = useState<Spot[]>([]);
@@ -36,7 +38,11 @@ export function SpotsBrowser({
     setLoading(true);
     setError(null);
     api
-      .getSpots(query, category)
+      .getSpots(
+        query,
+        category,
+        activeAddressId ? { addressId: activeAddressId, radiusMiles, sort: "distance" } : undefined,
+      )
       .then((result) => {
         if (cancelled) return;
         setSpots(result);
@@ -53,7 +59,7 @@ export function SpotsBrowser({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, category]);
+  }, [query, category, activeAddressId, radiusMiles]);
 
   return (
     <div>

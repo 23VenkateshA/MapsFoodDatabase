@@ -2,8 +2,9 @@
 
 import { UtensilsCrossed } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChatPanel } from "@/components/ChatPanel";
+import { LocationBar } from "@/components/LocationBar";
 import { ModeToggle } from "@/components/ModeToggle";
 import { Sidebar } from "@/components/Sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,11 +21,35 @@ const MapView = dynamic(() => import("@/components/MapView").then((m) => m.MapVi
 });
 
 export default function Home() {
-  const { ready, bootstrapError, viewMode, lastSpots, hasCustomDataset, activeSpotCount, demoSpotCount } =
-    useAppState();
+  const {
+    ready,
+    bootstrapError,
+    viewMode,
+    lastSpots,
+    hasCustomDataset,
+    activeSpotCount,
+    demoSpotCount,
+    addresses,
+    activeAddressId,
+    radiusMiles,
+    itinerary,
+    selectedSpotId,
+    setSelectedSpotId,
+  } = useAppState();
   const [browseSpots, setBrowseSpots] = useState<Spot[]>([]);
+  const mapColumnRef = useRef<HTMLDivElement>(null);
 
   const mapSpots = viewMode === "browse" ? browseSpots : lastSpots;
+  const activeAddress = addresses.find((a) => a.id === activeAddressId) ?? null;
+  const itineraryCoords = itinerary
+    .map((stop) => stop.spot.coordinates)
+    .filter((c): c is { lat: number; lng: number } => c.lat != null && c.lng != null);
+
+  useEffect(() => {
+    if (selectedSpotId && typeof window !== "undefined" && window.innerWidth < 1024) {
+      mapColumnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [selectedSpotId]);
 
   if (!ready) {
     return (
@@ -63,8 +88,9 @@ export default function Home() {
             : `${demoSpotCount} saved NYC spots — chat for curated picks, or search and filter the full list.`}
         </p>
 
-        <div className="mt-4">
+        <div className="mt-4 flex flex-col gap-3">
           <ModeToggle />
+          <LocationBar />
         </div>
 
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -75,9 +101,16 @@ export default function Home() {
               <ChatPanel />
             )}
           </div>
-          <div>
+          <div ref={mapColumnRef}>
             <h2 className="text-[22px] font-semibold mb-2">Map</h2>
-            <MapView spots={mapSpots} />
+            <MapView
+              spots={mapSpots}
+              anchor={activeAddress ? { lat: activeAddress.lat, lng: activeAddress.lng, label: activeAddress.label } : null}
+              radiusMiles={activeAddress ? radiusMiles : null}
+              itineraryStops={itineraryCoords}
+              selectedSpotId={selectedSpotId}
+              onSelectSpot={setSelectedSpotId}
+            />
           </div>
         </div>
       </main>

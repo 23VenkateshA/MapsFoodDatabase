@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 
 from deps import get_session_id
 from models.schemas import SessionStateOut
-from services import store
+from services import itinerary_service, store
 from services.places_data import load_demo_places
 
 router = APIRouter(tags=["session"])
@@ -20,7 +20,7 @@ def get_session_state(session_id: str = Depends(get_session_id)) -> dict:
     active = uploaded if uploaded else load_demo_places()
     return {
         "bookmarks": store.get_bookmarks(session_id),
-        "itinerary": store.get_itinerary(session_id),
+        "itinerary": itinerary_service.build_schedule(store.get_itinerary(session_id)),
         "has_custom_dataset": uploaded is not None,
         "active_spot_count": len(active),
         "demo_spot_count": len(load_demo_places()),

@@ -66,13 +66,16 @@ Return 2-5 spots. Use real, accurate coordinates for any fallback spot you add.
 """
 
 
-def build_system_prompt(saved_places: list[dict]) -> str:
+def build_system_prompt(saved_places: list[dict], location_context: str | None = None) -> str:
     compact = [
         {k: p[k] for k in ("id", "name", "neighborhood", "cuisine", "price_level",
                             "rating", "lat", "lng", "notes", "happy_hour_info")}
         for p in saved_places
     ]
-    return SYSTEM_PROMPT_TEMPLATE.format(saved_places_json=json.dumps(compact, indent=2))
+    prompt = SYSTEM_PROMPT_TEMPLATE.format(saved_places_json=json.dumps(compact, indent=2))
+    if location_context:
+        prompt += f"\n\nUser's current location context: {location_context} Prefer nearby spots when relevant.\n"
+    return prompt
 
 
 def extract_json(text: str) -> dict:
@@ -151,8 +154,14 @@ def rule_based_match(user_query: str, saved_places: list[dict], bookmarked_ids: 
     }
 
 
-def get_recommendations(user_query: str, saved_places: list[dict], history: list[dict], bookmarked_ids: set[str]) -> dict:
-    system_prompt = build_system_prompt(saved_places)
+def get_recommendations(
+    user_query: str,
+    saved_places: list[dict],
+    history: list[dict],
+    bookmarked_ids: set[str],
+    location_context: str | None = None,
+) -> dict:
+    system_prompt = build_system_prompt(saved_places, location_context)
     if OPENROUTER_API_KEY:
         try:
             result = call_openrouter(user_query, system_prompt, history)

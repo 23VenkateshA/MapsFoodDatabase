@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
-from routers import bookmarks, chat, import_, itinerary, session, spots  # noqa: E402
+from routers import addresses, bookmarks, chat, import_, itinerary, session, spots  # noqa: E402
 from services.store import init_db  # noqa: E402
 
 app = FastAPI(title="NYC Dining Concierge API")
@@ -42,3 +42,4 @@ app.include_router(bookmarks.router)
 app.include_router(itinerary.router)
 app.include_router(session.router)
 app.include_router(import_.router)
+app.include_router(addresses.router)

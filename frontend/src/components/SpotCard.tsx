@@ -1,28 +1,51 @@
 "use client";
 
-import { Bookmark, BookmarkCheck, Check, ExternalLink, Lightbulb, MapPin, Plus, Sparkles, Star } from "lucide-react";
+import { Bookmark, BookmarkCheck, Check, ExternalLink, Footprints, Lightbulb, MapPin, Plus, Sparkles, Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useAppState } from "@/lib/app-state";
 import type { Spot } from "@/lib/types";
 
 export function SpotCard({ spot }: { spot: Spot }) {
-  const { isBookmarked, toggleBookmark, isInItinerary, addToItinerary } = useAppState();
+  const { isBookmarked, toggleBookmark, isInItinerary, addToItinerary, selectedSpotId, setSelectedSpotId } =
+    useAppState();
   const bookmarked = isBookmarked(spot.id);
   const inItinerary = isInItinerary(spot.id);
+  const isSelected = selectedSpotId === spot.id;
 
   return (
-    <div className="rounded-lg bg-card p-3 sm:p-4 transition-colors hover:bg-secondary/60">
+    <div
+      className={`rounded-lg bg-card p-3 sm:p-4 border-l-2 transition-colors hover:bg-secondary/60 ${
+        isSelected ? "border-l-primary bg-secondary/50" : "border-l-transparent"
+      }`}
+    >
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-          <span className="font-semibold text-foreground">{spot.name}</span>
+        <div className="min-w-0 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
+          <button
+            type="button"
+            onClick={() => setSelectedSpotId(isSelected ? null : spot.id)}
+            className="text-left font-semibold text-foreground hover:text-primary hover:underline underline-offset-2"
+          >
+            {spot.name}
+          </button>
+          <span className="text-muted-foreground">·</span>
           <span className="inline-flex items-center gap-1 tabular-nums font-semibold">
             <Star className="size-3.5" /> {spot.rating ?? "—"}
           </span>
+          <span className="text-muted-foreground">·</span>
           <span>{spot.price_level}</span>
+          <span className="text-muted-foreground">·</span>
           <span className="inline-flex items-center gap-1 text-muted-foreground">
             <MapPin className="size-3.5" /> {spot.neighborhood || "—"}
           </span>
+          {spot.walk_minutes != null && (
+            <>
+              <span className="text-muted-foreground">·</span>
+              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                <Footprints className="size-3.5" /> {spot.walk_minutes} min
+              </span>
+            </>
+          )}
         </div>
         {spot.source === "saved" ? (
           <Badge className="shrink-0 gap-1 bg-primary/15 text-primary hover:bg-primary/15">
@@ -80,7 +103,15 @@ export function SpotCard({ spot }: { spot: Spot }) {
             <ExternalLink className="size-3.5" /> {spot.links.reservation_platform || "Reserve"}
           </a>
         ) : (
-          <span className="flex items-center justify-center text-xs text-muted-foreground">No reservation</span>
+          <span
+            className={buttonVariants({
+              size: "sm",
+              variant: "outline",
+              className: "gap-1.5 pointer-events-none opacity-50",
+            })}
+          >
+            No reservation
+          </span>
         )}
         <Button
           size="sm"

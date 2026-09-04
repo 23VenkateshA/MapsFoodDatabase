@@ -64,6 +64,34 @@ class Spot(BaseModel):
     coordinates: Coordinates = Field(default_factory=Coordinates)
     links: Links = Field(default_factory=Links)
     itinerary_context: ItineraryContext = Field(default_factory=ItineraryContext)
+    distance_miles: Optional[float] = None
+    walk_minutes: Optional[int] = None
+
+
+class AddressIn(BaseModel):
+    label: str
+    address: str
+
+
+class Address(BaseModel):
+    id: str
+    label: str
+    address: str
+    lat: float
+    lng: float
+    is_default: bool = False
+
+
+class ItineraryStop(BaseModel):
+    """One scheduled itinerary entry - the spot plus the timing computed by
+    services/itinerary_service.py (arrival/departure clock times, estimated
+    walk time to the next stop, and an optional scheduling-conflict note)."""
+
+    spot: Spot
+    arrival_time: str
+    departure_time: str
+    travel_to_next_minutes: Optional[int] = None
+    timing_warning: Optional[str] = None
 
 
 class ChatMessage(BaseModel):
@@ -74,6 +102,10 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     history: list[ChatMessage] = Field(default_factory=list)
+    near_label: Optional[str] = None
+    near_lat: Optional[float] = None
+    near_lng: Optional[float] = None
+    radius_miles: Optional[float] = None
 
 
 class ChatResponse(BaseModel):
@@ -90,7 +122,7 @@ class SessionStateOut(BaseModel):
     state client-side the way Streamlit's server-rendered model allowed."""
 
     bookmarks: list[Spot]
-    itinerary: list[Spot]
+    itinerary: list[ItineraryStop]
     has_custom_dataset: bool
     active_spot_count: int
     demo_spot_count: int
