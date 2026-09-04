@@ -8,11 +8,10 @@ never has to know about - each browser gets its own isolated bookmarks/
 itinerary/uploaded-dataset, closely mirroring the original per-tab isolation,
 but now surviving backend restarts and multiple requests.
 
-The demo auto-seed (4 bookmark ids + 1 itinerary id on a genuinely fresh
-session) is preserved exactly: it fires once per session_id, tracked via the
-`sessions` table's `initialized` flag, not by checking if bookmarks/itinerary
-are empty - so Clear/Reset never re-triggers it, matching the original
-st.session_state `if key not in st.session_state` semantics.
+A session starts genuinely empty (no auto-seeded demo bookmarks/itinerary,
+per explicit instruction) - `ensure_session_seeded` only records that a
+session_id has been seen before, via the `sessions` table's `initialized`
+flag, so a first-time visit and a page reload behave identically.
 """
 
 from __future__ import annotations
@@ -22,12 +21,9 @@ import os
 import sqlite3
 from pathlib import Path
 
-from .places_data import load_demo_places, place_to_spot
+from .places_data import load_demo_places
 
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", Path(__file__).resolve().parent.parent / "data" / "app.db"))
-
-SEED_BOOKMARK_IDS = ["212-east", "wiggle-room", "the-bean", "mahmoud-s-corner-halal-food-cart"]
-SEED_ITINERARY_ID = "cello-s-pizzeria"
 
 
 def _connect() -> sqlite3.Connection:
@@ -56,35 +52,12 @@ def init_db() -> None:
 
 
 def ensure_session_seeded(session_id: str) -> None:
-    """Mirrors init_state()'s one-time seed - fires only for a session_id
-    that has never been seen before, never again after that (even once
-    Clear/Reset has emptied the tables)."""
+    """Records that a session_id has been seen before - a fresh session
+    starts with empty bookmarks/itinerary, same as Clear/Reset leaves it."""
     with _connect() as conn:
         row = conn.execute("SELECT initialized FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
         if row is not None:
-            return  # already initialized (whether or not it's since been cleared)
-
-        demo_places = load_demo_places()
-        by_id = {p["id"]: p for p in demo_places}
-
-        for i, spot_id in enumerate(SEED_BOOKMARK_IDS):
-            place = by_id.get(spot_id)
-            if not place:
-                continue
-            spot = place_to_spot(place, bookmarked_ids=set())
-            conn.execute(
-                "INSERT OR IGNORE INTO bookmarks (session_id, spot_id, spot_json) VALUES (?, ?, ?)",
-                (session_id, spot_id, json.dumps(spot)),
-            )
-
-        seed_place = by_id.get(SEED_ITINERARY_ID)
-        if seed_place:
-            spot = place_to_spot(seed_place, bookmarked_ids=set())
-            conn.execute(
-                "INSERT OR IGNORE INTO itinerary (session_id, spot_id, position, spot_json) VALUES (?, ?, ?, ?)",
-                (session_id, SEED_ITINERARY_ID, 0, json.dumps(spot)),
-            )
-
+            return
         conn.execute("INSERT INTO sessions (session_id, initialized) VALUES (?, 1)", (session_id,))
 
 

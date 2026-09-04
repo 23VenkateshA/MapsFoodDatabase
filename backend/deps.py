@@ -6,6 +6,7 @@ per WebSocket connection."""
 
 from __future__ import annotations
 
+import os
 import uuid
 
 from fastapi import Request, Response
@@ -13,6 +14,17 @@ from fastapi import Request, Response
 from services import store
 
 SESSION_COOKIE_NAME = "nyc_concierge_session"
+
+# The frontend (vercel.app) and backend (onrender.com) are different sites in
+# production, so the session cookie needs SameSite=None; Secure to survive a
+# cross-site fetch at all - browsers silently drop a SameSite=Lax cookie set
+# from a cross-site response, which made every request look like a brand-new
+# session server-side (re-seeding the demo data every time). Locally
+# frontend/backend are "same site" (same host, different port), where Lax
+# works fine and None wouldn't (it requires Secure, i.e. HTTPS). RENDER is a
+# built-in env var Render sets on every deploy, so this needs no manual
+# config either way.
+IS_PRODUCTION = os.getenv("RENDER") is not None
 
 
 def get_session_id(request: Request, response: Response) -> str:
@@ -23,7 +35,8 @@ def get_session_id(request: Request, response: Response) -> str:
             key=SESSION_COOKIE_NAME,
             value=session_id,
             httponly=True,
-            samesite="lax",
+            samesite="none" if IS_PRODUCTION else "lax",
+            secure=IS_PRODUCTION,
             max_age=60 * 60 * 24 * 365,
         )
     store.ensure_session_seeded(session_id)

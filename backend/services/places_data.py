@@ -11,6 +11,18 @@ from pathlib import Path
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "places.json"
 
+# Generic filler enrich_places.py / import_service.py write into
+# happy_hour_info when no real happy-hour info was found - not something a
+# user wants to read as if it were an actual detail about the place.
+NO_INFO_HAPPY_HOUR = {
+    "Not listed — check with the venue for current happy hour specials.",
+    "N/A — coffee/bakery spot.",
+}
+
+
+def _real_happy_hour(info: str | None) -> str:
+    return info if info and info not in NO_INFO_HAPPY_HOUR else ""
+
 
 @lru_cache(maxsize=1)
 def load_demo_places() -> list[dict]:
@@ -50,7 +62,7 @@ def place_to_spot(place: dict, bookmarked_ids: set[str]) -> dict:
         "cuisine": place.get("cuisine", []),
         "price_level": place.get("price_level", "$"),
         "rating": place.get("rating"),
-        "match_highlight": place.get("happy_hour_info") or place.get("notes", ""),
+        "match_highlight": _real_happy_hour(place.get("happy_hour_info")) or place.get("notes", ""),
         "coordinates": {"lat": place.get("lat"), "lng": place.get("lng")},
         "links": {
             "google_maps": place.get("google_url", ""),

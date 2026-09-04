@@ -12,6 +12,8 @@ import json
 import os
 import re
 
+from .places_data import _real_happy_hour
+
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = "openai/gpt-4o-mini"
 
@@ -135,7 +137,7 @@ def rule_based_match(user_query: str, saved_places: list[dict], bookmarked_ids: 
             "cuisine": p["cuisine"],
             "price_level": p["price_level"],
             "rating": p["rating"],
-            "match_highlight": p.get("happy_hour_info") or p.get("notes", ""),
+            "match_highlight": _real_happy_hour(p.get("happy_hour_info")) or p.get("notes", ""),
             "coordinates": {"lat": p["lat"], "lng": p["lng"]},
             "links": {"google_maps": p.get("google_url", ""), "reservation_url": None, "reservation_platform": None},
             "itinerary_context": {"best_time_slot": "6:00 PM - 8:00 PM", "estimated_duration_min": 75},
