@@ -4,15 +4,15 @@ An AI concierge for a curated list of NYC restaurants and bars — chat for reco
 and filter the full list, bookmark spots, and build a light itinerary, all synced to an interactive
 map.
 
+**Live:** https://frontend-arvind-venkateshs-projects.vercel.app
+
 **This repo now has two apps:**
 
-- **`backend/` + `frontend/`** — the current stack: **Next.js (App Router, TypeScript, Tailwind,
-  shadcn/ui)** talking to a **FastAPI** backend. Clean Google-Material-style UI, `react-leaflet`
-  map with marker clustering.
+- **`backend/` + `frontend/`** — the current stack, deployed live above: **Next.js (App Router,
+  TypeScript, Tailwind, shadcn/ui)** talking to a **FastAPI** backend. Clean Google-Material-style
+  UI, `react-leaflet` map with marker clustering.
 - **`app.py`** (repo root) — the **original Streamlit + Folium** app this was migrated from. Left
-  in place and still deployed at
-  https://mapsfooddatabase-bhkjca9anz4utbcinglkux.streamlit.app — see its section below if you
-  want to run or retire that version.
+  in place for reference — see its section below if you want to run or retire that version.
 
 ## Architecture
 
@@ -105,8 +105,8 @@ changed silently):**
 
 ## Legacy Streamlit app (`app.py`)
 
-Still fully functional and independently deployed. See the version of this
-README before the migration (or just read `app.py`/`enrich_places.py`
+Still fully functional, kept in the repo for reference. See the version of
+this README before the migration (or just read `app.py`/`enrich_places.py`
 directly) for its own quickstart — the short version:
 
 ```bash
